@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "267674741866",
+    "project_id": "ride-app-2b814",
+    "storage_bucket": "ride-app-2b814.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:267674741866:android:4790a5dca1a2f017b7ee13",
+        "android_client_info": {
+          "package_name": "com.jeab.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAidVsxURLmAgXEnIisYYE_IUDhZftL-2A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
