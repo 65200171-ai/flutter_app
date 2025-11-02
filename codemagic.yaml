@@ -1,0 +1,23 @@
+workflows:
+  android_user:
+    name: Android (User)
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+    scripts:
+      - name: Build APK (User)
+        script: flutter build apk -t lib/main_user.dart --release --split-per-abi
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
+
+  android_driver:
+    name: Android (Driver)
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+    scripts:
+      - name: Build APK (Driver)
+        script: flutter build apk -t lib/main_driver.dart --release --split-per-abi
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
+
