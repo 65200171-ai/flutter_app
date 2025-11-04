@@ -1,6 +1,9 @@
+// lib/main_user.dart
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
@@ -21,7 +24,10 @@ Future<String> _getOrCreateUserId() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
-  runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: UserMapApp()));
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: UserMapApp(),
+  ));
 }
 
 class UserMapApp extends StatefulWidget {
@@ -34,20 +40,54 @@ class _UserMapAppState extends State<UserMapApp> {
   GoogleMapController? _map;
   final Set<Marker> _markers = {};
   String? _userId;
+
   StreamSubscription<Position>? _posSub;
   StreamSubscription<DatabaseEvent>? _vehSub;
+
   bool _running = false;
   String _status = 'ยังไม่เริ่มส่งตำแหน่ง';
-  String _vehicleStatus = 'รถ: รอข้อมูล...';
 
-  FirebaseDatabase? _db; // สำหรับอ่านตำแหน่งรถ
-
+  FirebaseDatabase? _db; // สำหรับอ่านตำแหน่งรถ (Realtime DB)
   static const LatLng _initTarget = LatLng(10.7230, 99.3745); // KMITL PCC
 
   @override
   void initState() {
     super.initState();
-    _setupVehicleListener(); // ✅ ฟังตำแหน่งรถจาก Realtime Database
+    _setupVehicleListener(); // ฟังตำแหน่งรถ bus01 จาก Realtime DB
+  }
+
+  Future<void> _setupVehicleListener() async {
+    try {
+      _db = FirebaseDatabase.instanceFor(
+        app: Firebase.app(),
+        databaseURL:
+        'https://ride-app-2b814-default-rtdb.asia-southeast1.firebasedatabase.app',
+      );
+
+      // one-shot test
+      final snap = await _db!.ref('vehicles/bus01').get();
+      debugPrint('ONE-SHOT vehicles/bus01 => ${snap.value}');
+
+      // subscribe
+      _vehSub = _db!.ref('vehicles/bus01').onValue.listen((ev) {
+        final val = ev.snapshot.value;
+        debugPrint('📡 vehicles/bus01 => $val');
+
+        if (val is Map) {
+          final lat = double.tryParse(val['lat']?.toString() ?? '');
+          final lng = double.tryParse(val['lng']?.toString() ?? '');
+          if (lat != null && lng != null) {
+            final pos = LatLng(lat, lng);
+            _setVehicleMarker(pos);
+          }
+        } else if (val == null) {
+          debugPrint('ℹ️ ยังไม่มีข้อมูลจากรถ');
+        }
+      });
+    } catch (e) {
+      debugPrint('❌ setupVehicleListener failed: $e');
+      _toast('เชื่อม Realtime DB ไม่ได้: $e');
+    }
   }
 
   Future<void> _ensurePermissions() async {
@@ -66,9 +106,11 @@ class _UserMapAppState extends State<UserMapApp> {
     try {
       await _ensurePermissions();
       _userId ??= await _getOrCreateUserId();
-      final docRef = FirebaseFirestore.instance.collection('ride_requests').doc(_userId);
+      final docRef =
+      FirebaseFirestore.instance.collection('ride_requests').doc(_userId);
 
-      final p = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final p =
+      await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
       await docRef.set({
         'userId': _userId,
         'status': 'open',
@@ -111,7 +153,8 @@ class _UserMapAppState extends State<UserMapApp> {
       await FirebaseFirestore.instance
           .collection('ride_requests')
           .doc(_userId)
-          .set({'status': 'done', 'updated_at': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+          .set({'status': 'done', 'updated_at': FieldValue.serverTimestamp()},
+          SetOptions(merge: true));
     }
     setState(() {
       _running = false;
@@ -142,54 +185,11 @@ class _UserMapAppState extends State<UserMapApp> {
         icon: BitmapDescriptor.defaultMarkerWithHue(30), // โทนส้ม
       ));
     });
+    _map?.animateCamera(CameraUpdate.newLatLng(pos));
   }
 
   void _animateTo(LatLng pos, {double zoom = 15}) {
     _map?.animateCamera(CameraUpdate.newLatLngZoom(pos, zoom));
-  }
-
-  /// ✅ ฟังตำแหน่งรถแบบเรียลไทม์จาก Realtime Database
-  Future<void> _setupVehicleListener() async {
-    try {
-      _db = FirebaseDatabase.instanceFor(
-        app: Firebase.app(),
-        databaseURL: 'https://ride-app-2b814-default-rtdb.asia-southeast1.firebasedatabase.app',
-      );
-
-      // one-shot ตรวจว่ามีค่าหรือไม่
-      final snap = await _db!.ref('vehicles/bus01').get();
-      debugPrint('ONE-SHOT vehicles/bus01 => ${snap.value}');
-      setState(() {
-        _vehicleStatus = 'ONE-SHOT: ${snap.value}';
-      });
-
-      _vehSub = _db!.ref('vehicles/bus01').onValue.listen((ev) {
-        final val = ev.snapshot.value;
-        debugPrint('📡 vehicles/bus01 => $val');
-
-        if (val is Map) {
-          final lat = double.tryParse(val['lat']?.toString() ?? '');
-          final lng = double.tryParse(val['lng']?.toString() ?? '');
-          if (lat != null && lng != null) {
-            final pos = LatLng(lat, lng);
-            _setVehicleMarker(pos);
-            setState(() => _vehicleStatus = 'bus01: $lat,$lng');
-            // ถ้าอยากตามรถตลอดให้เปิดบรรทัดนี้
-            // _map?.animateCamera(CameraUpdate.newLatLng(pos));
-          } else {
-            setState(() => _vehicleStatus = 'bus01: lat/lng parse ไม่ได้');
-          }
-        } else if (val == null) {
-          setState(() => _vehicleStatus = 'bus01: ยังไม่มีข้อมูล');
-        } else {
-          setState(() => _vehicleStatus = 'bus01: snapshot ไม่ใช่ Map');
-        }
-      });
-    } catch (e) {
-      debugPrint('❌ setupVehicleListener failed: $e');
-      _toast('เชื่อม Realtime DB ไม่ได้: $e');
-      setState(() => _vehicleStatus = 'DB error: $e');
-    }
   }
 
   @override
@@ -207,12 +207,28 @@ class _UserMapAppState extends State<UserMapApp> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('ผู้ใช้: ติดตามตำแหน่งรถ + ส่งตำแหน่งตัวเอง')),
+      appBar: AppBar(
+        title: const Text('ผู้ใช้: ติดตามตำแหน่งรถ + ส่งตำแหน่งตัวเอง'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut(); // ออกจากระบบ
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('ออกจากระบบแล้ว')),
+                );
+              }
+            },
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
             child: GoogleMap(
-              initialCameraPosition: const CameraPosition(target: _initTarget, zoom: 14),
+              initialCameraPosition:
+              const CameraPosition(target: _initTarget, zoom: 14),
               onMapCreated: (c) => _map = c,
               myLocationEnabled: true,
               myLocationButtonEnabled: true,
@@ -224,9 +240,6 @@ class _UserMapAppState extends State<UserMapApp> {
             child: Column(
               children: [
                 Text(_status, textAlign: TextAlign.center),
-                const SizedBox(height: 6),
-                Text(_vehicleStatus, textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -238,7 +251,9 @@ class _UserMapAppState extends State<UserMapApp> {
                     const SizedBox(width: 12),
                     ElevatedButton(
                       onPressed: _running ? _stop : null,
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                      ),
                       child: const Text('หยุด'),
                     ),
                   ],
